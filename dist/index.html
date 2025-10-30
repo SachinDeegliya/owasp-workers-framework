@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OWASP Compliance Dashboard</title>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', 'Roboto', 'Segoe UI', 'Arial', 'sans-serif';
+            background-color: #f5f5f5;
+            margin: 0;
+            padding: 20px;
+        }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');
+        .zone-list {
+            list-style-type: none;
+            padding: 0;
+            margin-bottom: 20px;
+        }
+        .zone-item {
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            padding: 10px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            transition: background 0.2s;
+        }
+        .zone-item:hover, .zone-item.active {
+            background-color: #e0f7fa;
+        }
+        .category {
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            margin-bottom: 10px;
+            padding: 10px 12px 8px 12px;
+        }
+        .category-header {
+            font-size: 17px;
+            font-weight: bold;
+            margin-bottom: 6px;
+        }
+        .feature {
+            margin-bottom: 6px;
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .compliant {
+            color: #1a7f37;
+            font-weight: 600;
+        }
+        .non-compliant {
+            color: #c62828;
+            font-weight: 600;
+        }
+        .loading {
+            text-align: center;
+            font-size: 20px;
+            margin-top: 50px;
+        }
+        .error {
+            color: red;
+            font-weight: bold;
+            text-align: center;
+            margin-top: 20px;
+        }
+        .zone-display {
+            font-size: 16px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body x-data="owaspDashboard()" x-init="init()">
+    <h1>OWASP Compliance Dashboard</h1>
+
+    <!-- Zone dropdown -->
+    <template x-if="loadingZones">
+        <div class="loading">Loading zones...</div>
+    </template>
+    <template x-if="error">
+        <div class="error" x-text="error"></div>
+    </template>
+    <div x-show="!loadingZones && !error && zones.length > 0" style="margin-bottom: 24px;">
+        <label for="zone-select" style="font-weight:bold;">Select Zone:</label>
+        <select id="zone-select" x-model="selectedZoneId" @change="onZoneChange" style="margin-left: 10px; padding: 8px; border-radius: 6px; border: 1px solid #ccc; font-size: 16px;">
+            <option value="" disabled>Select a zone</option>
+            <template x-for="zone in zones" :key="zone.id">
+                <option :value="zone.id" x-text="zone.name + ' (ID: ' + zone.id + ')' "></option>
+            </template>
+        </select>
+    </div>
+
+    <!-- Display Zone ID -->
+    <div id="zone-display" class="zone-display" x-show="selectedZone && selectedZone.id">
+        <span style="font-weight:600;">Zone ID:</span> <span x-text="selectedZone.id"></span>
+    </div>
+
+    <!-- Compliance results will be displayed here -->
+    <template x-if="loadingCompliance">
+        <div class="loading">Loading compliance data...</div>
+    </template>
+    <template x-if="complianceError">
+        <div class="error" x-text="complianceError"></div>
+    </template>
+    <div id="compliance-results" x-show="complianceResults && !loadingCompliance && !complianceError" style="margin-top: 24px;">
+        <div style="display: flex; flex-direction: column; gap: 24px;">
+            <template x-for="([category, details], idx) in Object.entries(complianceResults)" :key="category">
+                <div class="category"
+                    :style="
+                        details.features.every(f => f.complianceStatus === 'Compliant')
+                            ? 'background: #eaffea;'
+                            : details.features.some(f => f.complianceStatus === 'Non-Compliant')
+                                ? 'background: #ffeaea;'
+                                : ''
+                    ">
+                    <div class="category-header" :class="details.compliant ? 'compliant' : 'non-compliant'">
+                        <span x-text="(idx + 1) + '. ' + category"></span> - <span x-text="details.compliant ? 'Compliant' : 'Non-Compliant'" ></span>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 2px; margin-top: 8px;">
+                        <template x-for="feature in details.features" :key="feature.name">
+                            <div class="feature" style="background: #f9f9f9; border-radius: 5px; padding: 6px 12px; min-width: 180px;">
+                                <span style="color: #222; font-weight: 500;" x-text="feature.name + ':'"></span>
+                                <span :class="feature.complianceStatus === 'Compliant' ? 'compliant' : 'non-compliant'" x-text="feature.complianceStatus"></span>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <script>
+    function owaspDashboard() {
+        return {
+            zones: [],
+            loadingZones: true,
+            error: '',
+            selectedZoneId: '',
+            selectedZone: null,
+            complianceResults: null,
+            loadingCompliance: false,
+            complianceError: '',
+            init() {
+                this.fetchZones();
+            },
+            async fetchZones() {
+                this.loadingZones = true;
+                this.error = '';
+                try {
+                    const response = await fetch('/api/listzones');
+                    const data = await response.json();
+                    if (data.activeZones && data.activeZones.length > 0) {
+                        this.zones = data.activeZones;
+                    } else {
+                        this.error = 'No zones found.';
+                    }
+                } catch (e) {
+                    this.error = 'Failed to load zones: ' + (e.message || e);
+                } finally {
+                    this.loadingZones = false;
+                }
+            },
+            async onZoneChange() {
+                this.selectedZone = this.zones.find(z => z.id === this.selectedZoneId) || null;
+                this.complianceResults = null;
+                this.complianceError = '';
+                if (this.selectedZone) {
+                    this.loadingCompliance = true;
+                    try {
+                        const response = await fetch(`/api/owasp?zone_id=${this.selectedZone.id}`);
+                        const data = await response.json();
+                        if (data && typeof data === 'object') {
+                            this.complianceResults = data;
+                        } else {
+                            this.complianceError = 'No compliance data found.';
+                        }
+                    } catch (e) {
+                        this.complianceError = 'Failed to load data: ' + (e.message || e);
+                    } finally {
+                        this.loadingCompliance = false;
+                    }
+                }
+            }
+        }
+    }
+    </script>
+</body>
+</html> 
